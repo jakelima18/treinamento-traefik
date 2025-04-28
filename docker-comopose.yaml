@@ -1,0 +1,109 @@
+version: '3'
+
+services:
+  reverse-proxy:
+    # The official v3 Traefik docker image
+    image: traefik:v3.3
+    # Enables the web UI and tells Traefik to listen to docker
+    command: 
+      - --api.dashboard=true
+      - --providers.docker
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.le.acme.email=jackson@agileops.com.br
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --log.level=DEBUG
+    ports:
+      # The HTTP port
+      - "80:80"
+      - "443:443"
+      # The Web UI (enabled by --api.insecure=true)
+      - "8080:8080"
+    volumes:
+      # So that Traefik can listen to the Docker events
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./letsencrypt:/letsencrypt
+    labels:
+    - "traefik.http.routers.reverse-proxy.rule=Host(`traefik.agileops.com.br`)"
+    - "traefik.http.routers.reverse-proxy.entrypoints=web,websecure"
+    - "traefik.http.routers.reverse-proxy.tls=true"
+    - "traefik.http.routers.reverse-proxy.tls.certresolver=le"
+    - "traefik.http.routers.reverse-proxy.service=api@internal"
+    - "traefik.http.routers.reverse-proxy.middlewares=auth-traefik"
+    - "traefik.http.middlewares.auth-traefik.basicauth.users=admin:$$2y$$05$$ZoBCeOsqxyO7P2WtehPUJeVdl0OJGLFjgjXdhm84NAZS1C3K130bi" 
+
+  whoami:
+    # A container that exposes an API to show its IP address
+    image: traefik/whoami
+    labels:
+      # Rota HTTP para redirecionar para HTTPS
+      - "traefik.http.routers.whoami-http.rule=(Host(`whoami.agileops.com.br`) && Path(`/blog`)) || Host(`whoami.agileops.com.br`)"
+      - "traefik.http.routers.whoami-http.entrypoints=web"
+      - "traefik.http.routers.whoami-http.middlewares=https-redirect"
+      - "traefik.http.middlewares.https-redirect.redirectscheme.scheme=https"
+
+      # Rota HTTPS normal
+      - "traefik.http.routers.whoami-https.rule=(Host(`whoami.agileops.com.br`) && Path(`/blog`)) || Host(`whoami.agileops.com.br`)"
+      - "traefik.http.routers.whoami-https.entrypoints=websecure"
+      - "traefik.http.routers.whoami-https.tls=true"
+      - "traefik.http.routers.whoami-https.tls.certresolver=le"
+      - "traefik.http.routers.whoami-https.priority=2"
+
+      # Health check configurações
+      - "traefik.http.services.whoami.loadbalancer.healthcheck.hostname=whoami.agileops.com.br"
+      - "traefik.http.services.whoami.loadbalancer.healthcheck.path=/"
+      - "traefik.http.services.whoami.loadbalancer.healthcheck.method=GET"
+      - "traefik.http.services.whoami.loadbalancer.healthcheck.interval=10s"
+      - "traefik.http.services.whoami.loadbalancer.healthcheck.timeout=5s"
+      - "traefik.http.services.whoami.loadbalancer.healthcheck.status=200"
+      - "traefik.http.services.whoami.loadbalancer.healthcheck.port=80"
+      - "traefik.http.services.whoami.loadbalancer.healthcheck.scheme=http"
+
+  api:
+    image: traefik/whoami
+    labels:
+      - "traefik.http.routers.api.rule=Host(`whoami.agileops.com.br`) || PathPrefix(`/api`)"
+      - "traefik.http.routers.api.entrypoints=web"
+      - "traefik.http.routers.api.entrypoints=web,websecure"
+      - "traefik.http.routers.api.tls=true"
+      - "traefik.http.routers.api.tls.certresolver=le"
+      - "traefik.http.routers.api.priority=1"
+
+  whoami2:
+    image: traefik/whoami
+    labels:
+      - "traefik.http.routers.whoami2.entrypoints=web,websecure"
+      - "traefik.http.routers.whoami2.tls=true"
+      - "traefik.http.routers.whoami2.tls.certresolver=le"
+      - "traefik.http.routers.whoami2.rule=Host(`header.agileops.com.br`) && HeaderRegexp(`X-Test-Header`, `^(hello|hi)$`)"
+
+  whoami-query:
+    image: traefik/whoami
+    labels:
+      - "traefik.http.routers.whoami-query.rule=Host(`header.agileops.com.br`) && Query(`mobile`, `android`)"
+      - "traefik.http.routers.whoami-query.entrypoints=web,websecure"
+      - "traefik.http.routers.whoami-query.tls=true"
+      - "traefik.http.routers.whoami-query.tls.certresolver=le"
+
+  whoami-queryregexp:
+    image: traefik/whoami
+    labels:
+      - "traefik.http.routers.whoami-queryregexp.rule=Host(`header.agileops.com.br`) && QueryRegexp(`mobile`, `^(true|yes)$`)"
+      - "traefik.http.routers.whoami-queryregexp.entrypoints=web,websecure"
+      - "traefik.http.routers.whoami-queryregexp.tls=true"
+      - "traefik.http.routers.whoami-queryregexp.tls.certresolver=le"
+
+  whoami-protected:
+    image: traefik/whoami
+    labels:
+      - "traefik.http.routers.whoami-protected.rule=Host(`header.agileops.com.br`) && Path(`/protected`)"
+      - "traefik.http.routers.whoami-protected.entrypoints=web"
+      - "traefik.http.routers.whoami-protected.middlewares=auth"
+      - "traefik.http.middlewares.auth.basicauth.users=user:$$2y$$05$$DNchxjY3qYhnGTyIKCLfWe7k1ulPKnm7lvz3RlDom/dx8BpbFG9w." # login tester / senha test
+      - "traefik.http.routers.whoami-protected.entrypoints=web,websecure"
+      - "traefik.http.routers.whoami-protected.tls=true"
+      - "traefik.http.routers.whoami-protected.tls.certresolver=le"
+      - "traefik.http.routers.whoami-protected.middlewares=test-whitelist"
+      - "traefik.http.middlewares.test-whitelist.ipwhitelist.sourcerange=200.220.236.220/32"
+      - "traefik.http.services.whoami-protected.loadbalancer.server.port=80"
